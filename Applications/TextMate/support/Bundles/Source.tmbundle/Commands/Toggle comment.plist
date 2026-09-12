@@ -30,6 +30,15 @@ def out(*args)
   end )
 end
 
+# TM_LINE_INDEX is a UTF-8 byte offset (TextMate env contract).
+# Ruby 2+ String#[] is in characters. Convert once, then stay in chars.
+def tm_char_index(str, byte_index = ENV["TM_LINE_INDEX"])
+  n = byte_index.to_i
+  return 0 if n &lt;= 0
+  return str.length if n &gt;= str.bytesize
+  str.byteslice(0, n).length
+end
+
 # find all available comment variables
 var_suffixes = [""]
 2.upto(1.0/0.0) do |n|
@@ -82,7 +91,7 @@ var_suffixes.each do |suffix|
       else
         r = text.sub( /^(\s*)#{com[:esc_start]}(.*?)#{com[:esc_end]}(\s*)$/,
                       '\1\2\3' )
-        i = ENV["TM_LINE_INDEX"].to_i
+        i = tm_char_index(text)
         i = i &gt; text.index(/#{com[:esc_start]}/)            ?
             [[0, i - com[:start].length].max, r.length].min :
             [i, r.length].min
@@ -99,7 +108,7 @@ var_suffixes.each do |suffix|
         exit
       else
         r = text.sub(regex, '\1\2\3')
-        i = ENV["TM_LINE_INDEX"].to_i
+        i = tm_char_index(text)
         i = i &gt; text.index(/#{com[:esc_start]}/)            ?
             [[0, i - com[:start].length].max, r.length].min :
             [i, r.length].min
@@ -112,7 +121,7 @@ var_suffixes.each do |suffix|
 end
 
 # none of our removals worked, so preform an insert (minding indent setting)
-text[ENV["TM_LINE_INDEX"].to_i, 0] = "\0" unless $selected or text.empty?
+text[tm_char_index(text), 0] = "\0" unless $selected or text.empty?
 case default[:mode]
 when "line"  # apply comment line by line
   if text.empty?
