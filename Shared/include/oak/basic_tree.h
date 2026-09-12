@@ -110,8 +110,14 @@ namespace oak
 		static bool eq (node_t* lhs, node_t* rhs) { return (lhs->is_null() && rhs->is_null()) || lhs == rhs; }
 
 	public:
-		struct iterator : std::iterator<std::bidirectional_iterator_tag, value_type>
+		struct iterator
 		{
+			typedef std::bidirectional_iterator_tag   iterator_category;
+			typedef typename basic_tree_t::value_type value_type;
+			typedef std::ptrdiff_t                    difference_type;
+			typedef value_type*                       pointer;
+			typedef value_type&                       reference;
+
 			iterator (node_t* node, basic_tree_t* tree) : _node(node), _info(_KeyT(), _node->_relative_key, _node->_value), _tree(tree) { }
 
 			bool operator== (iterator const& rhs) const { return  eq(_node, rhs._node); }
