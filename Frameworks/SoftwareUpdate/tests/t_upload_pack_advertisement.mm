@@ -209,3 +209,60 @@ void test_asset_url_rejects_malformed_inputs ()
 	OAK_ASSERT(OakUpdateAssetURLForVersion(@"2.1.2-undead", [NSURL URLWithString:@"https://github.com/textmatelives/textmate"]) == nil);
 	OAK_ASSERT(OakUpdateAssetURLForVersion(@"2.1.2-undead", [NSURL URLWithString:@"https://api.github.com/repos/textmatelives/textmate/releases/latest"]) == nil);
 }
+
+// ============================================
+// = OakUpdateReleaseNotesURLForVersion       =
+// ============================================
+
+void test_release_notes_url_from_advertisement_url ()
+{
+	// release.yml renders the version’s CHANGELOG section to
+	// TextMate-{version}-notes.html and uploads it next to the .tbz; the URL
+	// is derived from the advertisement URL by the same convention.
+	NSURL* feed = [NSURL URLWithString:@"https://github.com/textmatelives/textmate.git/info/refs?service=git-upload-pack"];
+	NSURL* expected = [NSURL URLWithString:@"https://github.com/textmatelives/textmate/releases/download/v2.1.2-undead/TextMate-2.1.2-undead-notes.html"];
+	OAK_ASSERT([OakUpdateReleaseNotesURLForVersion(@"2.1.2-undead", feed) isEqual:expected]);
+}
+
+void test_release_notes_url_rejects_malformed_inputs ()
+{
+	NSURL* feed = [NSURL URLWithString:@"https://github.com/textmatelives/textmate.git/info/refs?service=git-upload-pack"];
+	OAK_ASSERT(OakUpdateReleaseNotesURLForVersion(nil, feed) == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesURLForVersion(@"", feed) == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesURLForVersion(@"2.1.2-undead", nil) == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesURLForVersion(@"2.1.2-undead", [NSURL URLWithString:@"https://github.com/textmatelives/textmate"]) == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesURLForVersion(@"2.1.2-undead", [NSURL URLWithString:@"https://api.github.com/repos/textmatelives/textmate/releases/latest"]) == nil);
+}
+
+// ====================================
+// = OakUpdateReleaseNotesDocument    =
+// ====================================
+
+void test_release_notes_document_wraps_fragment ()
+{
+	NSString* fragment   = @"<article>\n<h2>2026-08-27 (v2.2.1-undead)</h2>\n<p>One fix.</p>\n</article>";
+	NSString* stylesheet = @"body { color: red; }";
+	NSString* html = OakUpdateReleaseNotesDocument(fragment, stylesheet);
+	OAK_ASSERT(html != nil);
+	OAK_ASSERT([html hasPrefix:@"<!DOCTYPE html>"]);
+	OAK_ASSERT([html containsString:fragment]);
+	OAK_ASSERT([html containsString:stylesheet]);
+	// The fragment is fetched over the network without the signature check
+	// the .tbz gets, so the document it renders in must permit nothing beyond
+	// its own inline stylesheet and data: images: no scripts, no network.
+	OAK_ASSERT([html containsString:@"http-equiv=\"Content-Security-Policy\""]);
+	OAK_ASSERT([html containsString:@"default-src 'none'"]);
+	OAK_ASSERT([html containsString:@"style-src 'unsafe-inline'"]);
+	OAK_ASSERT([html containsString:@"img-src data:"]);
+	// A missing stylesheet must not leak “(null)” into the page.
+	OAK_ASSERT(![OakUpdateReleaseNotesDocument(fragment, nil) containsString:@"(null)"]);
+}
+
+void test_release_notes_document_rejects_empty ()
+{
+	// An empty or whitespace-only asset means there is nothing to show; the
+	// dialog then omits the pane rather than rendering a blank box.
+	OAK_ASSERT(OakUpdateReleaseNotesDocument(nil, @"") == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesDocument(@"", @"") == nil);
+	OAK_ASSERT(OakUpdateReleaseNotesDocument(@" \n\t", @"") == nil);
+}

@@ -81,6 +81,9 @@ filters    = "|#{filter} --nosmart"
 
 document   = ARGF.read.force_encoding('UTF-8')
 document   = wrap_authors(wrap_key_equivalents(document))
+# multimarkdown reads `[#54](url)` as a citation, rendering “(1)(url)” plus a
+# footnote list instead of a link. Escaping the hash makes it an ordinary link.
+document   = document.gsub(/\[#(?=\d+\]\()/) { %q{[\#} }
 head, body = document.scan(/\A((?:^\w+:\s+.*$\n)*)\n?((?m:.*))\z/).flatten
 tmp        = head.scan(/^(\w+):\s+(.*)$/).collect { |pair| [pair[0].downcase, pair[1].strip] }
 headers    = Hash[*tmp.flatten]

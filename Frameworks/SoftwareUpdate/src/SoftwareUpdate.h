@@ -57,6 +57,20 @@ NSString* OakLatestVersionInUploadPackAdvertisement (NSData* data, NSString* cha
 // when either input doesn’t fit.
 NSURL* OakUpdateAssetURLForVersion (NSString* version, NSURL* advertisementURL);
 
+// Builds the release-notes URL for a version by the same convention —
+// release.yml renders the version’s CHANGELOG.md section with bin/gen_html to
+// TextMate-{version}-notes.html and uploads it next to the .tbz. Returns nil
+// when either input doesn’t fit.
+NSURL* OakUpdateReleaseNotesURLForVersion (NSString* version, NSURL* advertisementURL);
+
+// Wraps a release-notes fragment (bin/gen_html output) in the document the
+// update dialog renders: the given stylesheet inline, and a
+// Content-Security-Policy that permits nothing beyond that stylesheet and
+// data: images — no scripts, network, frames or fonts — since the fragment
+// arrives over the network without the signature check the .tbz gets.
+// Returns nil when the fragment is empty.
+NSString* OakUpdateReleaseNotesDocument (NSString* fragment, NSString* stylesheet);
+
 // Maps a non-2xx HTTP response to an NSError, preferring the “message” field
 // GitHub puts in error bodies (e.g. “API rate limit exceeded for …”) over a
 // bare status code. Returns nil for 2xx or non-HTTP responses.

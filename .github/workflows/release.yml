@@ -289,6 +289,23 @@ jobs:
           echo "::endgroup::"
           echo "notes_file=$NOTES_FILE" >> "$GITHUB_OUTPUT"
 
+      # The in-app update dialog shows these notes before the download. It
+      # fetches TextMate-${VERSION}-notes.html from this release by convention
+      # (OakUpdateReleaseNotesURLForVersion, Frameworks/SoftwareUpdate) and
+      # renders it with scripts off. Same converter as the About window’s
+      # Changes page, without the page template: the app supplies its own.
+      - name: Render release notes for the update dialog
+        if: steps.tagcheck.outputs.should_release == 'true'
+        id: notes_html
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          HTML_FILE="$RUNNER_TEMP/TextMate-${VERSION}-notes.html"
+          bin/gen_html -t "TextMate ${VERSION}" "${{ steps.notes.outputs.notes_file }}" > "$HTML_FILE"
+          test -s "$HTML_FILE"
+          echo "notes_html=$HTML_FILE" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub release
         if: steps.tagcheck.outputs.should_release == 'true'
         env:
@@ -311,7 +328,8 @@ jobs:
             --title "TextMate ${VERSION}" \
             --notes-file "${{ steps.notes.outputs.notes_file }}" \
             --generate-notes \
-            "${{ steps.archive.outputs.archive }}"
+            "${{ steps.archive.outputs.archive }}" \
+            "${{ steps.notes_html.outputs.notes_html }}"
 
       - name: Cleanup keychain
         if: always()
