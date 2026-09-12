@@ -6,6 +6,7 @@
 #import <OakAppKit/OakTransitionViewController.h>
 #import <OakAppKit/OakUIConstructionFunctions.h>
 #import <Security/Security.h>
+#import <WebKit/WebKit.h>
 
 NSString* const kUserDefaultsLastSoftwareUpdateCheckKey                        = @"SoftwareUpdateLastPoll";
 NSString* const kUserDefaultsSoftwareUpdateSuspendUntilKey                     = @"SoftwareUpdateSuspendUntil";
@@ -162,7 +163,9 @@ NSString* OakLatestVersionInUploadPackAdvertisement (NSData* data, NSString* cha
 	return best;
 }
 
-NSURL* OakUpdateAssetURLForVersion (NSString* version, NSURL* advertisementURL)
+// {host}/{owner}/{repo}/releases/download/v{version}/{fileName}, derived from
+// the advertisement URL’s /{owner}/{repo}.git/info/refs shape.
+static NSURL* OakReleaseAssetURL (NSString* version, NSURL* advertisementURL, NSString* fileName)
 {
 	if(!version.length)
 		return nil;
@@ -173,7 +176,55 @@ NSURL* OakUpdateAssetURLForVersion (NSString* version, NSURL* advertisementURL)
 		return nil;
 
 	NSString* repo = [parts[2] substringToIndex:[parts[2] length] - 4];
-	return [NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@/%@/releases/download/v%@/TextMate-%@.tbz", advertisementURL.host, parts[1], repo, version, version]];
+	return [NSURL URLWithString:[NSString stringWithFormat:@"https://%@/%@/%@/releases/download/v%@/%@", advertisementURL.host, parts[1], repo, version, fileName]];
+}
+
+NSURL* OakUpdateAssetURLForVersion (NSString* version, NSURL* advertisementURL)
+{
+	return OakReleaseAssetURL(version, advertisementURL, [NSString stringWithFormat:@"TextMate-%@.tbz", version]);
+}
+
+NSURL* OakUpdateReleaseNotesURLForVersion (NSString* version, NSURL* advertisementURL)
+{
+	return OakReleaseAssetURL(version, advertisementURL, [NSString stringWithFormat:@"TextMate-%@-notes.html", version]);
+}
+
+// The notes pane is styled like the About window’s Changes page, whose
+// stylesheet (About/css/stylesheet.css) and background image ship in the
+// application bundle. The image is inlined as a data: URI so the document
+// needs no base URL and therefore no file access; the CSP permits data:
+// images and nothing else. Falls back to a plain stylesheet when the About
+// resources are missing, e.g. in the test runner.
+static NSString* OakReleaseNotesStylesheet ()
+{
+	NSURL* cssURL = [NSBundle.mainBundle URLForResource:@"stylesheet" withExtension:@"css" subdirectory:@"About/css"];
+	NSString* css = cssURL ? [NSString stringWithContentsOfURL:cssURL encoding:NSUTF8StringEncoding error:nullptr] : nil;
+	if(!css)
+		return @":root { color-scheme: light dark; }\nbody { font: 13px/1.6 -apple-system, sans-serif; color: CanvasText; margin: 1.15rem; }\na { color: LinkText; }\n";
+
+	NSURL* imageURL = [NSBundle.mainBundle URLForResource:@"tml_image" withExtension:@"png" subdirectory:@"About/css"];
+	if(NSData* image = imageURL ? [NSData dataWithContentsOfURL:imageURL] : nil)
+		css = [css stringByReplacingOccurrencesOfString:@"url(\"tml_image.png\")" withString:[NSString stringWithFormat:@"url(\"data:image/png;base64,%@\")", [image base64EncodedStringWithOptions:0]]];
+
+	// The About page sits in a 700 pt window; in a pane its margin is a bezel.
+	return [css stringByAppendingString:@"\nbody { margin: 0.6rem; }\n"];
+}
+
+NSString* OakUpdateReleaseNotesDocument (NSString* fragment, NSString* stylesheet)
+{
+	if(![fragment stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].length)
+		return nil;
+
+	return [NSString stringWithFormat:
+		@"<!DOCTYPE html>\n"
+		 "<html>\n"
+		 "<head>\n"
+		 "<meta charset=\"utf-8\">\n"
+		 "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src 'none'; style-src 'unsafe-inline'; img-src data:\">\n"
+		 "<style>\n%@\n</style>\n"
+		 "</head>\n"
+		 "<body>\n%@\n</body>\n"
+		 "</html>\n", stylesheet ?: @"", fragment];
 }
 
 // Case-insensitive header lookup (HTTP/2 lowercases header names; the
@@ -282,7 +333,7 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 
 @interface SUDownloadViewController : NSViewController
 - (instancetype)initWithCompletionHandler:(void(^)())completionHandler;
-- (void)presentUIForBackgroundCheck:(BOOL)backgroundCheck remoteURL:(NSURL*)remoteURL remoteVersion:(NSString*)remoteVersion redownloadEnabled:(BOOL)allowRedownload;
+- (void)presentUIForBackgroundCheck:(BOOL)backgroundCheck remoteURL:(NSURL*)remoteURL remoteVersion:(NSString*)remoteVersion releaseNotes:(NSString*)releaseNotes redownloadEnabled:(BOOL)allowRedownload;
 @end
 
 // ==================
@@ -354,7 +405,7 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 				[NSUserDefaults.standardUserDefaults removeObjectForKey:kUserDefaultsSoftwareUpdateSuspendUntilKey];
 			}
 
-			[self checkWithCompletionHandler:^(NSURL* remoteURL, NSString* remoteVersion, NSError* error){
+			[self checkWithCompletionHandler:^(NSURL* remoteURL, NSString* remoteVersion, NSString* releaseNotes, NSError* error){
 				self.errorString = error ? [NSString stringWithFormat:@"Error: %@", error.localizedDescription] : nil;
 				if(error)
 				{
@@ -366,7 +417,7 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 					SUDownloadViewController* alertViewController = [[SUDownloadViewController alloc] initWithCompletionHandler:^{
 						completionHandler(NSBackgroundActivityResultFinished);
 					}];
-					[alertViewController presentUIForBackgroundCheck:YES remoteURL:remoteURL remoteVersion:remoteVersion redownloadEnabled:NO];
+					[alertViewController presentUIForBackgroundCheck:YES remoteURL:remoteURL remoteVersion:remoteVersion releaseNotes:releaseNotes redownloadEnabled:NO];
 				}
 			}];
 		}];
@@ -377,26 +428,26 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 {
 	BOOL isShiftDown = OakIsAlternateKeyOrMouseEvent(NSEventModifierFlagShift);
 
-	[self checkWithCompletionHandler:^(NSURL* remoteURL, NSString* remoteVersion, NSError* error){
+	[self checkWithCompletionHandler:^(NSURL* remoteURL, NSString* remoteVersion, NSString* releaseNotes, NSError* error){
 		SUDownloadViewController* alertViewController = [[SUDownloadViewController alloc] init];
 		if(error)
 				[alertViewController presentError:error];
-		else	[alertViewController presentUIForBackgroundCheck:NO remoteURL:remoteURL remoteVersion:remoteVersion redownloadEnabled:isShiftDown];
+		else	[alertViewController presentUIForBackgroundCheck:NO remoteURL:remoteURL remoteVersion:remoteVersion releaseNotes:releaseNotes redownloadEnabled:isShiftDown];
 	}];
 }
 
-- (void)checkWithCompletionHandler:(void(^)(NSURL* remoteURL, NSString* remoteVersion, NSError* error))completionHandler
+- (void)checkWithCompletionHandler:(void(^)(NSURL* remoteURL, NSString* remoteVersion, NSString* releaseNotes, NSError* error))completionHandler
 {
 	// The channel is whatever Preferences → Software Update is set to; there
 	// is no modifier-key override, so what a user is offered always matches
 	// what the pop-up says.
 	NSString* updateChannel = [NSUserDefaults.standardUserDefaults stringForKey:kUserDefaultsSoftwareUpdateChannelKey];
 	if(!updateChannel)
-		return completionHandler(nil, nil, [NSError errorWithDomain:@"SoftwareUpdate" code:0 userInfo:@{ NSLocalizedDescriptionKey: @"No channel configured." }]);
+		return completionHandler(nil, nil, nil, [NSError errorWithDomain:@"SoftwareUpdate" code:0 userInfo:@{ NSLocalizedDescriptionKey: @"No channel configured." }]);
 
 	NSURL* url = _channels[updateChannel];
 	if(!url)
-		return completionHandler(nil, nil, [NSError errorWithDomain:@"SoftwareUpdate" code:0 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"No channel named ‘%@’.", updateChannel] }]);
+		return completionHandler(nil, nil, nil, [NSError errorWithDomain:@"SoftwareUpdate" code:0 userInfo:@{ NSLocalizedDescriptionKey: [NSString stringWithFormat:@"No channel named ‘%@’.", updateChannel] }]);
 
 	os_activity_initiate("Software update check", OS_ACTIVITY_FLAG_DEFAULT, ^{
 		self.checking = YES;
@@ -456,14 +507,47 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 				}
 			}
 
-			dispatch_async(dispatch_get_main_queue(), ^{
-				[NSUserDefaults.standardUserDefaults setObject:[NSDate date] forKey:kUserDefaultsLastSoftwareUpdateCheckKey];
-				self.checking = NO;
-				completionHandler(remoteURL, remoteVersion, error);
-			});
+			// Only an offered update shows the dialog the notes go in, so only
+			// then are they fetched. (Commas stay inside parentheses: this is
+			// still the body of the os_activity_initiate macro.)
+			NSString* localVersion = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
+			NSURL* notesURL = (!error && OakCompareVersionStrings(localVersion, remoteVersion) == NSOrderedAscending) ? OakUpdateReleaseNotesURLForVersion(remoteVersion, url) : nil;
+
+			[self fetchReleaseNotesAtURL:notesURL completionHandler:^(NSString* releaseNotes){
+				dispatch_async(dispatch_get_main_queue(), ^{
+					[NSUserDefaults.standardUserDefaults setObject:[NSDate date] forKey:kUserDefaultsLastSoftwareUpdateCheckKey];
+					self.checking = NO;
+					completionHandler(remoteURL, remoteVersion, releaseNotes, error);
+				});
+			}];
 		}];
 		[dataTask resume];
 	});
+}
+
+// Fetches the rendered release notes for an offered version. The notes are an
+// optional pane on the update dialog, so every failure — no asset on this
+// release (none published before this shipped carries one), a slow network,
+// a body that is not text — completes with nil and the dialog appears without
+// the pane, as it did before. The dialog waits for this before it is shown,
+// so that it appears complete rather than growing a pane after the fact; the
+// short timeout keeps a manual check responsive when the asset is slow.
+- (void)fetchReleaseNotesAtURL:(NSURL*)url completionHandler:(void(^)(NSString* fragment))completionHandler
+{
+	if(!url)
+		return completionHandler(nil);
+
+	NSMutableURLRequest* request = [NSMutableURLRequest requestWithURL:url cachePolicy:NSURLRequestUseProtocolCachePolicy timeoutInterval:10];
+	[request setValue:OakDownloadManager.sharedInstance.userAgentString forHTTPHeaderField:@"User-Agent"];
+
+	NSURLSessionDataTask* dataTask = [NSURLSession.sharedSession dataTaskWithRequest:request completionHandler:^(NSData* data, NSURLResponse* response, NSError* error){
+		NSInteger statusCode = [response isKindOfClass:NSHTTPURLResponse.class] ? ((NSHTTPURLResponse*)response).statusCode : 0;
+		NSString* fragment = (!error && statusCode == 200) ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+		if(!fragment)
+			os_log(OS_LOG_DEFAULT, "No release notes at %{public}@: %{public}@", url.absoluteString, error ? error.localizedDescription : [NSString stringWithFormat:@"HTTP %ld", (long)statusCode]);
+		completionHandler(fragment);
+	}];
+	[dataTask resume];
 }
 @end
 
@@ -474,6 +558,11 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 @interface SUInfoViewController : NSViewController
 @property (nonatomic) NSTextField* messageTextField;
 @property (nonatomic) NSTextField* informativeTextField;
+// Set when the dialog is wider than the text column would make it — a
+// release-notes pane below — so the column takes the width it is given
+// instead of its own 298 pt. Optional priorities do not work here: any pull
+// toward a narrower width makes AppKit snap a resized window back to it.
+@property (nonatomic) BOOL fillsWidth;
 @end
 
 @interface SUProgressViewController : NSViewController
@@ -483,9 +572,12 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 @property (nonatomic) NSProgress*          progress;
 @end
 
-@interface SUDownloadViewController ()
+@interface SUDownloadViewController () <WKNavigationDelegate>
 {
 	SUDownloadViewController* _retainedSelf;
+
+	NSBox*     _releaseNotesBox;
+	WKWebView* _releaseNotesView;
 
 	void(^_completionHandler)();
 	BOOL(^_runModalCompletionHandler)(NSModalResponse);
@@ -529,6 +621,9 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 
 - (void)dealloc
 {
+	_releaseNotesView.navigationDelegate = nil;
+	[_releaseNotesView stopLoading];
+
 	if(_completionHandler)
 		_completionHandler();
 }
@@ -575,21 +670,83 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 	NSImage* image = [NSImage imageNamed:NSImageNameApplicationIcon];
 	image.size = NSMakeSize(64, 64);
 
-	NSDictionary* views = @{
+	NSMutableDictionary* views = [@{
 		@"image":   [NSImageView imageViewWithImage:image],
 		@"content": self.contentViewController.view,
 		@"buttons": self.buttonStackView,
-	};
+	} mutableCopy];
+	if(_releaseNotesBox)
+		views[@"notes"] = _releaseNotesBox;
 
 	NSView* contentView = [[NSView alloc] initWithFrame:NSZeroRect];
 	OakAddAutoLayoutViewsToSuperview(views.allValues, contentView);
 
-	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[image(==64)]-(16)-[content]-|"          options:NSLayoutFormatAlignAllTop metrics:nil views:views]];
-	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[image]-(>=20)-[buttons]-|"                     options:0                         metrics:nil views:views]];
-	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(16)-[image(==64)]-(>=20)-|"                  options:0                         metrics:nil views:views]];
-	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[content]-(==20@750,>=20@250)-[buttons]-(18)-|" options:0                         metrics:nil views:views]];
+	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[image(==64)]-(16)-[content]-|" options:NSLayoutFormatAlignAllTop metrics:nil views:views]];
+	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:[image]-(>=20)-[buttons]-|"            options:0                         metrics:nil views:views]];
+	[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:|-(16)-[image(==64)]-(>=20)-|"         options:0                         metrics:nil views:views]];
+
+	if(_releaseNotesBox)
+	{
+		// The pane runs the full width under the icon and the text column,
+		// hugging whichever of the two ends lower, and takes all the height the
+		// window has to give (its vertical hugging priority is the lowest in
+		// the dialog).
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"H:|-(24)-[notes]-|"                           options:0 metrics:nil views:views]];
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[image]-(==12@750,>=12)-[notes]"             options:0 metrics:nil views:views]];
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[content]-(>=12)-[notes]-(20)-[buttons]-(18)-|" options:0 metrics:nil views:views]];
+	}
+	else
+	{
+		[NSLayoutConstraint activateConstraints:[NSLayoutConstraint constraintsWithVisualFormat:@"V:[content]-(==20@750,>=20@250)-[buttons]-(18)-|" options:0 metrics:nil views:views]];
+	}
 
 	self.view = contentView;
+}
+
+// Adds a pane with the offered version’s release notes, laid out by
+// -loadView, so this must run before the view loads. Scripts are off, and the
+// document’s Content-Security-Policy admits no subresources beyond data:
+// images (OakUpdateReleaseNotesDocument), so the pane renders text, links and
+// the About page’s backdrop, and nothing else. The size is a minimum: the
+// panel becomes resizable once the pane exists (-runModalWithCompletionHandler:).
+- (void)showReleaseNotesDocument:(NSString*)html
+{
+	NSAssert(!self.viewLoaded, @"release notes must be added before the view loads");
+
+	if(!_releaseNotesBox)
+	{
+		self.infoViewController.fillsWidth = YES;
+
+		WKWebViewConfiguration* configuration = [[WKWebViewConfiguration alloc] init];
+		configuration.defaultWebpagePreferences.allowsContentJavaScript = NO;
+
+		_releaseNotesView = [[WKWebView alloc] initWithFrame:NSZeroRect configuration:configuration];
+		_releaseNotesView.navigationDelegate = self;
+
+		_releaseNotesBox = [[NSBox alloc] initWithFrame:NSZeroRect];
+		_releaseNotesBox.boxType            = NSBoxCustom;
+		_releaseNotesBox.borderColor        = NSColor.separatorColor;
+		_releaseNotesBox.cornerRadius       = 5;
+		_releaseNotesBox.contentViewMargins = NSZeroSize;
+		_releaseNotesBox.contentView        = _releaseNotesView;
+		[_releaseNotesBox setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationVertical];
+		[_releaseNotesBox.widthAnchor  constraintGreaterThanOrEqualToConstant:560].active = YES;
+		[_releaseNotesBox.heightAnchor constraintGreaterThanOrEqualToConstant:360].active = YES;
+	}
+	[_releaseNotesView loadHTMLString:html baseURL:nil];
+}
+
+// The only navigation the pane starts itself is the loadHTMLString: above,
+// which loads as about:blank. Anything else is a link in the notes: it goes
+// to the browser, and the pane stays on the notes.
+- (void)webView:(WKWebView*)webView decidePolicyForNavigationAction:(WKNavigationAction*)navigationAction decisionHandler:(void(^)(WKNavigationActionPolicy))decisionHandler
+{
+	if(navigationAction.navigationType == WKNavigationTypeOther && [navigationAction.request.URL.absoluteString isEqualToString:@"about:blank"])
+		return decisionHandler(WKNavigationActionPolicyAllow);
+
+	if(navigationAction.request.URL)
+		[NSWorkspace.sharedWorkspace openURL:navigationAction.request.URL];
+	decisionHandler(WKNavigationActionPolicyCancel);
 }
 
 - (void)viewWillAppear
@@ -652,6 +809,20 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 	window.level                   = NSModalPanelWindowLevel;
 	window.styleMask               = NSWindowStyleMaskTitled;
 
+	// With release notes on board the panel may be resized to read them; the
+	// pane takes the extra space (SUInfoViewController) and the fitting size
+	// is the floor.
+	if(_releaseNotesBox)
+	{
+		window.styleMask      |= NSWindowStyleMaskResizable;
+		window.contentMinSize  = self.view.fittingSize;
+
+		// A resizable titled window grows the three title-bar buttons, two of
+		// them disabled; this is still an alert, so keep the title bar bare.
+		for(NSWindowButton button : { NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton })
+			[window standardWindowButton:button].hidden = YES;
+	}
+
 	// If we use -[NSApplication runModalForWindow:] then the window
 	// won’t stay above document windows after the modal session ends
 	_runModalCompletionHandler = completionHandler;
@@ -689,7 +860,7 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 	}
 }
 
-- (void)presentUIForBackgroundCheck:(BOOL)backgroundCheck remoteURL:(NSURL*)remoteURL remoteVersion:(NSString*)remoteVersion redownloadEnabled:(BOOL)allowRedownload
+- (void)presentUIForBackgroundCheck:(BOOL)backgroundCheck remoteURL:(NSURL*)remoteURL remoteVersion:(NSString*)remoteVersion releaseNotes:(NSString*)releaseNotes redownloadEnabled:(BOOL)allowRedownload
 {
 	NSString* localVersion = [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleShortVersionString"];
 	NSComparisonResult ordering = OakCompareVersionStrings(localVersion, remoteVersion);
@@ -703,6 +874,9 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 	{
 		self.infoViewController.messageTextField.stringValue     = @"New Version Available";
 		self.infoViewController.informativeTextField.stringValue = [NSString stringWithFormat: @"%@ %@ is now available. You have version %@. Would you like to download it now?", [NSBundle.mainBundle objectForInfoDictionaryKey:@"CFBundleName"], remoteVersion, localVersion];
+
+		if(NSString* document = OakUpdateReleaseNotesDocument(releaseNotes, OakReleaseNotesStylesheet()))
+			[self showReleaseNotesDocument:document];
 
 		[self addButtonWithTitle:@"Download"];
 		[self addButtonWithTitle:backgroundCheck ? @"Later" : @"Cancel"];
@@ -900,7 +1074,19 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 // = SUInfoViewController =
 // ========================
 
+@interface SUInfoViewController ()
+{
+	NSLayoutConstraint* _widthConstraint;
+}
+@end
+
 @implementation SUInfoViewController
+- (void)setFillsWidth:(BOOL)flag
+{
+	_fillsWidth = flag;
+	_widthConstraint.active = !flag;
+}
+
 - (void)loadView
 {
 	_messageTextField     = [NSTextField labelWithString:@"New Version Available"];
@@ -919,7 +1105,8 @@ static BOOL OakBundleIsSignedByTeam (NSURL* appURL, NSString* expectedTeamID)
 	_informativeTextField.selectable = YES;
 	_informativeTextField.font       = [NSFont messageFontOfSize:NSFont.smallSystemFontSize];
 
-	[stackView.widthAnchor constraintEqualToConstant:298].active = YES;
+	_widthConstraint = [stackView.widthAnchor constraintEqualToConstant:298];
+	_widthConstraint.active = !_fillsWidth;
 
 	self.view = stackView;
 }

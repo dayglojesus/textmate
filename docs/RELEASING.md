@@ -49,7 +49,9 @@ The `-undead` suffix is **required** (see the guard below).
 4. Merge the PR to `main`. The push to `main` touching `CHANGELOG.md` triggers
    the `Release` workflow (`release.yml:4-7`).
 5. Watch the `Release` run. On success it produces the `vX.Y.Z-undead` tag and a
-   public GitHub Release with the `TextMate-X.Y.Z-undead.tbz` asset attached.
+   public GitHub Release with two assets attached: `TextMate-X.Y.Z-undead.tbz`
+   and `TextMate-X.Y.Z-undead-notes.html`, the release notes as the in-app
+   update dialog shows them.
 6. Confirm an installed older build is offered the update (see "How users get
    it" below).
 
@@ -94,15 +96,20 @@ fresh in this job):
 9. **Staple** the ticket (retried until CloudKit propagates) and **verify
    Gatekeeper** with `spctl --assess` (`:242-262`).
 10. **Build the `.tbz`** `TextMate-${VERSION}.tbz` (`:264-275`).
-11. **Extract release notes** with `bin/extract_changes` (`:277-289`).
-12. **Create the GitHub Release** with `gh release create "v${VERSION}"`
-    (`:292-314`). A stable version gets neither `--prerelease` nor `--draft`, so
+11. **Extract release notes** with `bin/extract_changes` (`:278-291`).
+12. **Render the release notes for the update dialog** with `bin/gen_html`
+    (`:297-308`): the same converter as the About window's Changes
+    page, without the page template. The app fetches this file from the
+    release by name and renders it in the "New Version Available" dialog before
+    the download (see "How users get the update").
+13. **Create the GitHub Release** with `gh release create "v${VERSION}"`
+    (`:309-333`), attaching both assets. A stable version gets neither `--prerelease` nor `--draft`, so
     it becomes `releases/latest`. A `-beta` or `-exp` version is published with
-    `--prerelease` (`:304-307`), which keeps it out of `releases/latest`. That
+    `--prerelease` (`:321-324`), which keeps it out of `releases/latest`. That
     flag only governs how GitHub presents the release; which update channel is
     actually offered a tag is decided by `OakVersionAdmissibleOnChannel` in
     `Frameworks/SoftwareUpdate`.
-13. **Delete the ephemeral keychain** (always) (`:304-306`).
+14. **Delete the ephemeral keychain** (always) (`:334-336`).
 
 ## Required GitHub secrets
 
@@ -119,14 +126,27 @@ identity is matched by name (`CERT_IDENTITY_NAME` = "Developer ID Application").
 
 ## How users get the update
 
-The app checks `api.github.com/repos/textmatelives/textmate/releases/latest`
-(`Applications/TextMate/src/AppController.mm:494`), compares the running
-`CFBundleShortVersionString` against the release `tag_name`, downloads the first
-`.tbz` asset, and installs it only if the downloaded bundle carries a valid
-Developer ID Application signature whose Team Identifier matches the **running**
-app (`Frameworks/SoftwareUpdate/src/SoftwareUpdate.mm`). It then swaps the bundle
-in place and relaunches. A build signed by a different team — or unsigned — is
-refused.
+The app reads the repository's git ref advertisement
+(`github.com/textmatelives/textmate.git/info/refs?service=git-upload-pack`,
+`Applications/TextMate/src/AppController.mm:499`) — what `git ls-remote` uses,
+and unmetered, unlike the Releases API (issue #26) — and picks the highest
+`refs/tags/v*` version its update channel admits. Both release assets are then
+addressed by convention rather than looked up
+(`Frameworks/SoftwareUpdate/src/SoftwareUpdate.h`):
+
+* `releases/download/v{version}/TextMate-{version}-notes.html` is fetched
+  first, when the version is newer than the running one, and shown in the
+  "New Version Available" dialog above the Download button. It renders in a
+  web view with JavaScript off, inside a document whose Content-Security-Policy
+  permits nothing but its own stylesheet, and every link opens in the browser.
+  If the fetch fails — every release before this asset existed answers 404 —
+  the dialog appears without the notes pane.
+* `releases/download/v{version}/TextMate-{version}.tbz` is downloaded on
+  Download, and installed only if the bundle carries a valid Developer ID
+  Application signature whose Team Identifier matches the **running** app
+  (`Frameworks/SoftwareUpdate/src/SoftwareUpdate.mm`). It then swaps the bundle
+  in place and relaunches. A build signed by a different team — or unsigned —
+  is refused.
 
 ## Gotchas
 
