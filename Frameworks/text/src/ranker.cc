@@ -15,7 +15,7 @@ static bool is_subset (std::string const& needle, std::string const& haystack)
 }
 
 #ifndef NDEBUG
-static void print_matrix (size_t* matrix, size_t n, size_t m, std::string const& rowLabel, std::string const& colLabel)
+[[maybe_unused]] static void print_matrix (size_t* matrix, size_t n, size_t m, std::string const& rowLabel, std::string const& colLabel)
 {
 	fprintf(stderr, "   |");
 	for(size_t j = 0; j < m; ++j)

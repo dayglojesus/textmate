@@ -1,4 +1,5 @@
 #import "TMFileReference.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 NSNotificationName const TMURLWillCloseNotification = @"TMURLWillCloseNotification";
 
@@ -228,9 +229,9 @@ static NSImage* ImageNamed (NSString* imageName)
 				if([url.scheme isEqualToString:@"computer"])
 					image = [NSImage imageNamed:NSImageNameComputer];
 				else if(url.hasDirectoryPath)
-					image = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode((OSType)kGenericFolderIcon)];
+					image = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeFolder];
 				else
-					image = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode((OSType)kGenericDocumentIcon)];
+					image = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeData];
 			}
 
 			[image drawInRect:dstRect fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1];
