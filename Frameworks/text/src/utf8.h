@@ -56,8 +56,14 @@ namespace utf8
 	}
 
 	template <typename _Iter>
-	struct iterator_t : public std::iterator<std::bidirectional_iterator_tag, uint32_t>
+	struct iterator_t
 	{
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef uint32_t                        value_type;
+		typedef std::ptrdiff_t                  difference_type;
+		typedef uint32_t*                       pointer;
+		typedef uint32_t&                       reference;
+
 		typedef iterator_t self;
 
 		iterator_t (_Iter const& base_iterator) : base_iterator(base_iterator) { }
@@ -238,8 +244,14 @@ namespace utf8
 namespace diacritics
 {
 	template <typename _Iter>
-	struct iterator_t : public std::iterator<std::bidirectional_iterator_tag, uint32_t>
+	struct iterator_t
 	{
+		typedef std::bidirectional_iterator_tag iterator_category;
+		typedef uint32_t                        value_type;
+		typedef std::ptrdiff_t                  difference_type;
+		typedef uint32_t*                       pointer;
+		typedef uint32_t&                       reference;
+
 		typedef iterator_t self;
 
 		iterator_t (utf8::iterator_t<_Iter> const& first, utf8::iterator_t<_Iter> const& last) : current(first), stop(last) { }
