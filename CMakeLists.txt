@@ -89,6 +89,22 @@ add_compile_options(
   $<$<COMPILE_LANGUAGE:OBJCXX>:-include${CMAKE_SOURCE_DIR}/Shared/PCH/prelude.mm>
 )
 
+# Link noise. Every executable links the framework libraries both directly
+# and through their PUBLIC dependencies, so ld reports each repeat as an
+# ignored duplicate — harmless, and five such lines per clean build.
+add_link_options(-Wl,-no_warn_duplicate_libraries)
+
+# Archive noise. A few objects export no symbols (files holding only
+# Objective-C categories or a static constructor), and both ar's implicit
+# ranlib and the finishing ranlib warn about each. Build the archive
+# without a symbol table (ar's S modifier skips the implicit ranlib) and
+# let the finishing ranlib add it quietly.
+foreach(_lang C CXX OBJC OBJCXX)
+  set(CMAKE_${_lang}_ARCHIVE_CREATE "<CMAKE_AR> Scq <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_${_lang}_ARCHIVE_APPEND "<CMAKE_AR> Sq <TARGET> <LINK_FLAGS> <OBJECTS>")
+  set(CMAKE_${_lang}_ARCHIVE_FINISH "<CMAKE_RANLIB> -no_warning_for_no_symbols <TARGET>")
+endforeach()
+
 # Helpers
 include(CTest)
 include(cmake/TextMateHelpers.cmake)

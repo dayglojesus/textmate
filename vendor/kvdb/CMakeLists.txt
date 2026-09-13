@@ -1,4 +1,6 @@
 add_library(kvdb STATIC)
+# Third-party code: its NSKeyedArchiver calls are upstream's to change.
+target_compile_options(kvdb PRIVATE -Wno-deprecated-declarations)
 
 file(GLOB _src CONFIGURE_DEPENDS vendor/kvdb/*.m)
 target_sources(kvdb PRIVATE ${_src})

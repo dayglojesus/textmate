@@ -38,6 +38,9 @@ target_link_options(Onigmo INTERFACE
 
 target_compile_options(Onigmo PRIVATE
   $<$<COMPILE_LANGUAGE:C>:-Wno-incompatible-pointer-types>
-  $<$<COMPILE_LANGUAGE:C>:-Wno-char-subscripts>)
+  $<$<COMPILE_LANGUAGE:C>:-Wno-char-subscripts>
+  # Third-party code: K&R prototypes and sprintf are upstream's to change.
+  $<$<COMPILE_LANGUAGE:C>:-Wno-deprecated-non-prototype>
+  $<$<COMPILE_LANGUAGE:C>:-Wno-deprecated-declarations>)
 
 textmate_add_tests(Onigmo)
