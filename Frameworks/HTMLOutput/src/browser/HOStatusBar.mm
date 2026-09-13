@@ -72,7 +72,6 @@ static NSTextField* OakCreateTextField ()
 		_progressIndicator.maxValue             = 1;
 		_progressIndicator.indeterminate        = NO;
 		_progressIndicator.displayedWhenStopped = NO;
-		_progressIndicator.bezeled              = NO;
 
 		_spinner = [NSProgressIndicator new];
 		_spinner.controlSize          = NSControlSizeSmall;

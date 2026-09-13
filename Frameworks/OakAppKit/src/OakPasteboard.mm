@@ -453,7 +453,7 @@ namespace
 		if(NSNumber* historyId = options[@"historyId"])
 		{
 			char const* query = "SELECT id FROM history WHERE id = :history_id";
-			if(NSDictionary* row = RunSQLStatement(OakPasteboard.SQLDatabase, query, { { ":history_id", historyId } }).firstObject)
+			if(RunSQLStatement(OakPasteboard.SQLDatabase, query, { { ":history_id", historyId } }).firstObject)
 				return;
 		}
 	}

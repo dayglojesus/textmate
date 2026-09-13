@@ -1,4 +1,5 @@
 #import "FileBrowserViewController.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "FileBrowserView.h"
 #import "FileBrowserOutlineView.h"
 #import "FileBrowserNotifications.h"
@@ -1683,7 +1684,7 @@ static NSMutableIndexSet* MutableLongestCommonSubsequence (NSArray* lhs, NSArray
 		if([url.scheme isEqualToString:@"scm"])
 		{
 			if([url.query hasSuffix:@"unstaged"] || [url.query hasSuffix:@"untracked"])
-					image = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode((OSType)kGenericFolderIcon)];
+					image = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeFolder];
 			else	image = [NSImage imageNamed:@"SCMTemplate" inSameBundleAsClass:NSClassFromString(@"OakFileBrowser")];
 		}
 		else if([url.scheme isEqualToString:@"computer"])
@@ -1692,7 +1693,7 @@ static NSMutableIndexSet* MutableLongestCommonSubsequence (NSArray* lhs, NSArray
 		}
 		else
 		{
-			image = [NSWorkspace.sharedWorkspace iconForFileType:NSFileTypeForHFSTypeCode((OSType)kGenericFolderIcon)];
+			image = [NSWorkspace.sharedWorkspace iconForContentType:UTTypeFolder];
 		}
 
 		image = [image copy];
